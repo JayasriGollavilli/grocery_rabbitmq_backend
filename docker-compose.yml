@@ -1,0 +1,80 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: grocery-rabbitmq
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: grocery
+      RABBITMQ_DEFAULT_PASS: grocery_dev_password
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [grocery-net]
+
+  postgres:
+    image: postgres:16
+    container_name: grocery-postgres
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_DB: grocery_db
+      POSTGRES_USER: grocery_user
+      POSTGRES_PASSWORD: grocery_dev_password
+    volumes:
+      - grocery-postgres-data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grocery_user -d grocery_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    networks: [grocery-net]
+
+  redis:
+    image: redis:7-alpine
+    container_name: grocery-redis
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    networks: [grocery-net]
+
+  consumer:
+    build: .
+    container_name: grocery-consumer
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      RABBITMQ_URL: amqp://grocery:grocery_dev_password@rabbitmq:5672/%2F
+      RABBITMQ_QUEUE: grocery_requests
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: grocery_db
+      POSTGRES_USER: grocery_user
+      POSTGRES_PASSWORD: grocery_dev_password
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_KEY_PREFIX: "grocery:"
+    restart: unless-stopped
+    networks: [grocery-net]
+
+networks:
+  grocery-net:
+    name: grocery-net
+    driver: bridge
+
+volumes:
+  grocery-postgres-data:
